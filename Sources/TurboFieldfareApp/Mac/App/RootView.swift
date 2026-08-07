@@ -1,3 +1,4 @@
+import AppKit
 import TurboFieldfareAppCore
 import TurboFieldfareMacPresentation
 import SwiftUI
@@ -5,11 +6,19 @@ import SwiftUI
 struct RootView: View {
     let model: AppModel
     @State private var conversationChromeHeight: CGFloat = 0
+    @State private var sidebarWidth: CGFloat = 240
+    @State private var sidebarDragOrigin: CGFloat?
 
     var body: some View {
         HStack(spacing: 0) {
+            ConversationSidebarView(model: model)
+                .frame(width: sidebarWidth)
+                .frame(maxHeight: .infinity)
+
+            sidebarResizeHandle
+
             primaryContent
-                .frame(minWidth: 720, maxWidth: .infinity, maxHeight: .infinity)
+                .frame(minWidth: 640, maxWidth: .infinity, maxHeight: .infinity)
 
             Divider()
 
@@ -38,6 +47,33 @@ struct RootView: View {
                 transaction.animation = nil
             }
         }
+    }
+
+    private var sidebarResizeHandle: some View {
+        ZStack {
+            Divider()
+            Rectangle()
+                .fill(Color.clear)
+                .contentShape(Rectangle())
+                .onHover { inside in
+                    if inside {
+                        NSCursor.resizeLeftRight.set()
+                    } else {
+                        NSCursor.arrow.set()
+                    }
+                }
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in
+                            let start = sidebarDragOrigin ?? sidebarWidth
+                            if sidebarDragOrigin == nil { sidebarDragOrigin = sidebarWidth }
+                            sidebarWidth = min(
+                                420,
+                                max(160, start + value.translation.width))
+                        }
+                        .onEnded { _ in sidebarDragOrigin = nil })
+        }
+        .frame(width: 8)
     }
 
     private var primaryContent: some View {

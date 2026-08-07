@@ -60,6 +60,7 @@ struct OutputPaneView: View {
 
     private var transcript: some View {
         IncrementalTranscriptView(
+            history: model.conversation,
             prompt: model.outputPromptText,
             output: model.outputText,
             mailbox: model.generationTranscriptMailbox,
@@ -256,6 +257,7 @@ private struct LoadingModelText: View {
 }
 
 private struct IncrementalTranscriptView: NSViewRepresentable {
+    var history: [ConversationTurn]
     var prompt: String
     var output: String
     var mailbox: GenerationTranscriptMailbox?
@@ -267,6 +269,7 @@ private struct IncrementalTranscriptView: NSViewRepresentable {
         weak var scrollView: NSScrollView?
         weak var textView: NSTextView?
         var mailbox: GenerationTranscriptMailbox?
+        var history: [ConversationTurn] = []
         var prompt = ""
         var isTerminal = false
         var showsPrefillPlaceholder = false
@@ -287,6 +290,7 @@ private struct IncrementalTranscriptView: NSViewRepresentable {
         }
 
         func synchronize(
+            history: [ConversationTurn],
             prompt: String,
             output: String,
             mailbox: GenerationTranscriptMailbox?,
@@ -294,6 +298,7 @@ private struct IncrementalTranscriptView: NSViewRepresentable {
             showsPrefillPlaceholder: Bool
         ) {
             self.mailbox = mailbox
+            self.history = history
             self.prompt = prompt
             self.isTerminal = isTerminal
             self.showsPrefillPlaceholder = showsPrefillPlaceholder
@@ -384,6 +389,7 @@ private struct IncrementalTranscriptView: NSViewRepresentable {
             storage.beginEditing()
             let update = documentController.synchronize(
                 storage: storage,
+                history: history,
                 prompt: prompt,
                 response: response,
                 isTerminal: isTerminal,
@@ -426,7 +432,21 @@ private struct IncrementalTranscriptView: NSViewRepresentable {
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
 
-        let textView = NSTextView()
+        // TextKit 1 explicitly: NSTextView() would build a TextKit 2 stack,
+        // which ignores NSTextTable and NSTextBlock entirely.
+        let storage = NSTextStorage()
+        let layoutManager = NSLayoutManager()
+        let container = NSTextContainer(
+            size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+        container.widthTracksTextView = true
+        storage.addLayoutManager(layoutManager)
+        layoutManager.addTextContainer(container)
+
+        let textView = NSTextView(frame: .zero, textContainer: container)
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude)
         textView.isEditable = false
         textView.isSelectable = true
         textView.isRichText = true
@@ -448,6 +468,7 @@ private struct IncrementalTranscriptView: NSViewRepresentable {
         guard let textView = scrollView.documentView as? NSTextView else { return }
         context.coordinator.attach(scrollView: scrollView, textView: textView)
         context.coordinator.synchronize(
+            history: history,
             prompt: prompt,
             output: output,
             mailbox: mailbox,
@@ -468,6 +489,7 @@ private struct TranscriptPreview: View {
 
     var body: some View {
         IncrementalTranscriptView(
+            history: [],
             prompt: "Explain this clearly.",
             output: response,
             mailbox: nil,

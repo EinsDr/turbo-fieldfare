@@ -22,6 +22,10 @@ struct StatusHUDView: View {
                 HUDMetricView(value: rateText, label: "tok/s", animated: !model.isRunning)
                 HUDMetricView(value: tokensText, label: "tokens", animated: !model.isRunning)
                 HUDMetricView(value: memoryText, label: "memory", animated: !model.isRunning)
+                HUDMetricView(
+                    value: model.contextUsageText,
+                    label: "context",
+                    animated: !model.isRunning)
             }
         }
         .frame(height: 30)

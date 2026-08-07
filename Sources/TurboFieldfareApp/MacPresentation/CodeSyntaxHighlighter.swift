@@ -54,7 +54,11 @@ enum CodeSyntaxHighlighter {
     private static func looksLikeTable(_ source: String) -> Bool {
         source.components(separatedBy: "\n").contains { line in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            return trimmed.count >= 3 && trimmed.allSatisfy { $0 == "-" || $0 == " " }
+            guard trimmed.count >= 3 else { return false }
+            if trimmed.contains("\u{2502}") || trimmed.contains("\u{2500}") {
+                return true
+            }
+            return trimmed.allSatisfy { $0 == "-" || $0 == " " }
         }
     }
 

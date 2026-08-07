@@ -283,9 +283,20 @@ actor RealInferenceSession {
                 throw AppInferenceError.modelLoadFailed("session lost its loaded state")
             }
 
-            let renderedPrompt = try tokenizer.applyChatTemplate([
-                GFTokenizer.Message(role: .user, content: request.prompt)
-            ])
+            // Alternating user/assistant turns, oldest first. A payload
+            // without separators yields a single user message.
+            let segments = request.prompt
+                .components(separatedBy: ConversationTurn.separator)
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            let messages = segments.enumerated().map { index, text in
+                GFTokenizer.Message(
+                    role: index.isMultiple(of: 2) ? .user : .assistant,
+                    content: text)
+            }
+            let renderedPrompt = try tokenizer.applyChatTemplate(
+                messages.isEmpty
+                    ? [GFTokenizer.Message(role: .user, content: request.prompt)]
+                    : messages)
             let promptIds = tokenizer.encode(renderedPrompt, addBOS: false)
             progress.promptTokenCount = promptIds.count
             guard promptIds.count < runner.maxContext else {

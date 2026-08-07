@@ -9,8 +9,14 @@ import Foundation
 /// - Fenced code is never rewritten.
 enum ResponseMarkdownPreprocessor {
 
-    static func prepare(_ source: String) -> String {
+    struct Preparation {
+        let text: String
+        let tables: [MarkdownTable]
+    }
+
+    static func prepare(_ source: String) -> Preparation {
         let lines = source.components(separatedBy: "\n")
+        var tables: [MarkdownTable] = []
         var output: [String] = []
         var index = 0
         var insideFence = false
@@ -30,14 +36,18 @@ enum ResponseMarkdownPreprocessor {
                 continue
             }
             if let end = tableEnd(in: lines, startingAt: index) {
-                output.append(contentsOf: renderTable(Array(lines[index..<end])))
+                tables.append(makeTable(Array(lines[index..<end])))
+                output.append("")
+                output.append(TextTableRenderer.sentinel(tables.count - 1))
+                output.append("")
                 index = end
                 continue
             }
             output.append(convertImages(in: line))
             index += 1
         }
-        return output.joined(separator: "\n")
+        if insideFence { output.append("```") }
+        return Preparation(text: output.joined(separator: "\n"), tables: tables)
     }
 
     /// A copy with fenced blocks and inline code spans removed, used only to
@@ -95,46 +105,29 @@ enum ResponseMarkdownPreprocessor {
         text + String(repeating: " ", count: max(0, width - text.count))
     }
 
-    private static func renderTable(_ lines: [String]) -> [String] {
+    private static func makeTable(_ lines: [String]) -> MarkdownTable {
         var rows: [[String]] = []
         for (offset, line) in lines.enumerated() where offset != 1 {
             rows.append(cells(in: line))
         }
-        guard let columnCount = rows.map(\.count).max(), columnCount > 0 else {
-            return lines
-        }
+        let columnCount = max(rows.map(\.count).max() ?? 1, 1)
         for index in rows.indices {
             while rows[index].count < columnCount { rows[index].append("") }
         }
 
-        var widths = [Int](repeating: 0, count: columnCount)
-        for row in rows {
-            for (column, cell) in row.enumerated() {
-                widths[column] = max(widths[column], cell.count)
+        var alignments = cells(in: lines.count > 1 ? lines[1] : "")
+            .map { spec -> MarkdownTable.Alignment in
+                let leading = spec.hasPrefix(":")
+                let trailing = spec.hasSuffix(":")
+                if leading && trailing { return .center }
+                if trailing { return .right }
+                return .left
             }
+        while alignments.count < columnCount { alignments.append(.left) }
+        if alignments.count > columnCount {
+            alignments = Array(alignments.prefix(columnCount))
         }
-
-        var result = ["```"]
-        for (offset, row) in rows.enumerated() {
-            var text = ""
-            for (column, cell) in row.enumerated() {
-                text += pad(cell, to: widths[column])
-                if column < columnCount - 1 { text += "  " }
-            }
-            while text.hasSuffix(" ") { text.removeLast() }
-            result.append(text)
-
-            if offset == 0 {
-                var rule = ""
-                for (column, width) in widths.enumerated() {
-                    rule += String(repeating: "-", count: width)
-                    if column < columnCount - 1 { rule += "  " }
-                }
-                result.append(rule)
-            }
-        }
-        result.append("```")
-        return result
+        return MarkdownTable(rows: rows, alignments: alignments)
     }
 
     private static func convertImages(in line: String) -> String {

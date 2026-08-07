@@ -7,7 +7,10 @@ import SwiftMath
 ///
 /// If an expression fails to parse, its original LaTeX source is restored
 /// rather than dropped, so a malformed formula never costs you the text.
+@MainActor
 enum MathAttachmentRenderer {
+
+    private static var cache: [String: NSImage] = [:]
 
     static func substitute(
         _ spans: [MathSpan],
@@ -39,8 +42,14 @@ enum MathAttachmentRenderer {
             labelMode: span.isDisplay ? .display : .text,
             textAlignment: .left)
 
-        let (error, image) = math.asImage()
-        guard error == nil, let image, image.size.width > 0 else { return nil }
+        let key = "\(span.isDisplay)|\(fontSize)|\(span.latex)"
+        let cached = cache[key]
+        let (error, produced) = cached == nil ? math.asImage() : (nil, cached)
+        guard error == nil, let image = produced, image.size.width > 0 else { return nil }
+        if cached == nil {
+            if cache.count > 256 { cache.removeAll() }
+            cache[key] = image
+        }
 
         let attachment = NSTextAttachment()
         attachment.image = image

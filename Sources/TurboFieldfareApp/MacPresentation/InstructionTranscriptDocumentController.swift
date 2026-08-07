@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import TurboFieldfareAppCore
 
 @MainActor
 public final class InstructionTranscriptDocumentController {
@@ -20,6 +21,7 @@ public final class InstructionTranscriptDocumentController {
         }
     }
 
+    public private(set) var history: [ConversationTurn] = []
     public private(set) var prompt = ""
     public private(set) var response = ""
     public private(set) var isFinalized = false
@@ -63,6 +65,7 @@ public final class InstructionTranscriptDocumentController {
     @discardableResult
     public func synchronize(
         storage: NSMutableAttributedString,
+        history: [ConversationTurn] = [],
         prompt: String,
         response: String,
         isTerminal: Bool,
@@ -74,6 +77,7 @@ public final class InstructionTranscriptDocumentController {
             isTerminal: isTerminal,
             requested: showsPrefillPlaceholder)
         let needsRebuild = prompt != self.prompt
+            || history != self.history
             || !response.hasPrefix(self.response)
             || (isFinalized && !isTerminal)
             || displaysPrefillPlaceholder != self.showsPrefillPlaceholder
@@ -84,6 +88,7 @@ public final class InstructionTranscriptDocumentController {
                 && (!prompt.isEmpty || !response.isEmpty || displaysPrefillPlaceholder) {
             rebuild(
                 storage: storage,
+                history: history,
                 prompt: prompt,
                 response: response,
                 showsPrefillPlaceholder: displaysPrefillPlaceholder)
@@ -98,6 +103,7 @@ public final class InstructionTranscriptDocumentController {
         }
 
         self.prompt = prompt
+        self.history = history
         self.response = response
         self.showsPrefillPlaceholder = displaysPrefillPlaceholder
 
@@ -109,6 +115,12 @@ public final class InstructionTranscriptDocumentController {
             mutation = .finalized
         } else if !isTerminal {
             isFinalized = false
+            if responseChanged && !response.isEmpty && !displaysPrefillPlaceholder {
+                let rendered = renderer.render(response).attributedString
+                storage.replaceCharacters(in: assistantRange, with: rendered)
+                assistantRange.length = rendered.length
+                mutation = .rebuilt
+            }
         }
 
         return UpdateResult(mutation: mutation, assistantRange: assistantRange)
@@ -133,11 +145,30 @@ public final class InstructionTranscriptDocumentController {
 
     private func rebuild(
         storage: NSMutableAttributedString,
+        history: [ConversationTurn],
         prompt: String,
         response: String,
         showsPrefillPlaceholder: Bool
     ) {
         let document = NSMutableAttributedString()
+        for turn in history {
+            document.append(NSAttributedString(
+                string: "You\n",
+                attributes: Self.userLabelAttributes()))
+            document.append(NSAttributedString(
+                string: turn.prompt,
+                attributes: Self.promptAttributes()))
+            document.append(NSAttributedString(
+                string: "\n\n",
+                attributes: Self.promptAttributes()))
+            document.append(NSAttributedString(
+                string: "Answer\n",
+                attributes: Self.assistantLabelAttributes()))
+            document.append(renderer.render(turn.response).attributedString)
+            document.append(NSAttributedString(
+                string: "\n\n",
+                attributes: Self.responseAttributes()))
+        }
         if !prompt.isEmpty {
             document.append(NSAttributedString(
                 string: "You\n",

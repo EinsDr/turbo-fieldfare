@@ -43,8 +43,8 @@ public struct ResponseMarkdownRenderer {
         }
         let math = MathSpanExtractor.extract(from: source)
         let prepared = ResponseMarkdownPreprocessor.prepare(math.text)
-        guard !requiresRawFallback(prepared) else { return fallback(source) }
-        let presentationSource = prepared.replacingOccurrences(
+        guard !requiresRawFallback(prepared.text) else { return fallback(source) }
+        let presentationSource = prepared.text.replacingOccurrences(
             of: #"(?m)^([ \t]*\*\*[^*\n]+\*\*[ \t]*)\n(?=\S)"#,
             with: "$1\n\n",
             options: .regularExpression)
@@ -89,8 +89,10 @@ public struct ResponseMarkdownRenderer {
 
             guard output.length > 0 else { return fallback(source) }
             CodeSyntaxHighlighter.apply(to: output)
+            CodeBlockBackground.apply(to: output)
             MathAttachmentRenderer.substitute(
                 math.spans, in: output, fontSize: NSFont.systemFontSize)
+            TextTableRenderer.substitute(prepared.tables, in: output)
             return Result(attributedString: output, usedFallback: false)
         } catch {
             return fallback(source)

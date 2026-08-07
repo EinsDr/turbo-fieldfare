@@ -14,6 +14,9 @@ public final class AppModel {
     public var promptText: String = ""
     public private(set) var outputPromptText: String = ""
     public var outputText: String = ""
+    public private(set) var conversation: [ConversationTurn] = []
+    public private(set) var conversations: [ConversationRecord] = []
+    public private(set) var currentConversationID = UUID()
     public var runState: RunState = .idle
     public var runtimeOptions = AppRuntimeOptions()
     public var maxNewTokensOverride: Int?
@@ -207,8 +210,33 @@ public final class AppModel {
 
     public var canCancel: Bool { isRunning && !isCancellationPending }
 
+    /// Prompt tokens plus generated tokens for the exchange on screen. With
+    /// history now included in every prompt, this is what the next turn starts
+    /// from, so it doubles as a "how full is the window" gauge.
+    public var contextUsedTokens: Int {
+        let prompt = diagnostics?.promptTokenCount ?? livePrefillTotal
+        let generated = diagnostics?.generatedTokens ?? 0
+        return prompt + generated
+    }
+
+    public var contextUsageFraction: Double {
+        guard maxContextTokens > 0 else { return 0 }
+        return min(1, Double(contextUsedTokens) / Double(maxContextTokens))
+    }
+
+    public var contextUsageText: String {
+        func compact(_ value: Int) -> String {
+            value >= 1000
+                ? String(format: "%.1fk", Double(value) / 1000)
+                : "\(value)"
+        }
+        let used = contextUsedTokens
+        guard used > 0 else { return "\u{2014}" }
+        return compact(used) + "/" + compact(maxContextTokens)
+    }
+
     public var hasOutputTranscript: Bool {
-        !outputPromptText.isEmpty || !outputText.isEmpty
+        !outputPromptText.isEmpty || !outputText.isEmpty || !conversation.isEmpty
     }
 
     public var outputResponsePlainText: String {
@@ -711,6 +739,8 @@ public final class AppModel {
 
     public func clearOutput() {
         guard !isRunning else { return }
+        conversation.removeAll()
+        currentConversationID = UUID()
         outputPromptText = ""
         outputText = ""
         generationTranscriptMailbox?.reset()
@@ -720,6 +750,15 @@ public final class AppModel {
 
     public func run() {
         guard canRun else { return }
+
+        // The previous exchange has finished by the time a new run starts,
+        // so this is where it becomes history.
+        if !outputPromptText.isEmpty, !outputResponsePlainText.isEmpty {
+            conversation.append(ConversationTurn(
+                prompt: outputPromptText,
+                response: outputResponsePlainText))
+        }
+
         let request: AppGenerationRequest
         do {
             request = try makeRequest()
@@ -734,7 +773,7 @@ public final class AppModel {
         persistSettings()
 
         generationTranscriptMailbox?.reset()
-        outputPromptText = request.prompt
+        outputPromptText = promptText
         outputText = ""
         diagnostics = nil
         error = nil
@@ -776,10 +815,101 @@ public final class AppModel {
         client.cancel()
     }
 
+    /// Turns completed so far, including the exchange currently on screen.
+    public var currentConversationTurns: [ConversationTurn] {
+        var turns = conversation
+        let response = outputResponsePlainText
+        if !outputPromptText.isEmpty, !response.isEmpty {
+            turns.append(ConversationTurn(prompt: outputPromptText, response: response))
+        }
+        return turns
+    }
+
+    public func refreshConversations() {
+        conversations = ConversationStore.shared.load()
+    }
+
+    /// Persists the conversation on screen. Called whenever a run ends, so an
+    /// answer survives quitting immediately afterwards.
+    public func startNewConversation() {
+        guard !isRunning else { return }
+        saveCurrentConversation()
+        conversation.removeAll()
+        currentConversationID = UUID()
+        outputPromptText = ""
+        outputText = ""
+        generationTranscriptMailbox?.reset()
+        diagnostics = nil
+        error = nil
+        refreshConversations()
+    }
+
+    /// Loads every turn as history and leaves the pending exchange empty, so
+    /// the transcript shows the conversation and the next prompt continues it.
+    public func openConversation(_ id: UUID) {
+        guard !isRunning else { return }
+        saveCurrentConversation()
+        guard let record = ConversationStore.shared.load().first(where: { $0.id == id })
+        else { return }
+        generationTranscriptMailbox?.reset()
+        diagnostics = nil
+        error = nil
+        currentConversationID = record.id
+        conversation = record.turns
+        outputPromptText = ""
+        outputText = ""
+        refreshConversations()
+    }
+
+    public func deleteConversation(_ id: UUID) {
+        guard !isRunning else { return }
+        ConversationStore.shared.delete(id: id)
+        if id == currentConversationID {
+            conversation.removeAll()
+            currentConversationID = UUID()
+            outputPromptText = ""
+            outputText = ""
+            generationTranscriptMailbox?.reset()
+            diagnostics = nil
+            error = nil
+        }
+        refreshConversations()
+    }
+
+    public func saveCurrentConversation() {
+        let turns = currentConversationTurns
+        guard !turns.isEmpty else { return }
+        let existing = conversations.first { $0.id == currentConversationID }
+        let record = ConversationRecord(
+            id: currentConversationID,
+            title: ConversationRecord.title(from: turns),
+            createdAt: existing?.createdAt ?? Date(),
+            updatedAt: Date(),
+            turns: turns)
+        ConversationStore.shared.save(record)
+        refreshConversations()
+    }
+
+    /// Earlier exchanges plus the pending prompt, oldest first.
+    public func conversationPayload() -> String {
+        var parts: [String] = []
+        for turn in conversation {
+            parts.append(turn.prompt)
+            parts.append(turn.response)
+        }
+        parts.append(promptText)
+
+        while parts.count > 1,
+              parts.reduce(0, { $0 + $1.count }) > ConversationTurn.characterBudget {
+            parts.removeFirst(min(2, parts.count - 1))
+        }
+        return parts.joined(separator: ConversationTurn.separator)
+    }
+
     public func makeRequest() throws -> AppGenerationRequest {
         let request = AppGenerationRequest(
             modelDirectory: URL(fileURLWithPath: modelPathText),
-            prompt: promptText,
+            prompt: conversationPayload(),
             maxNewTokens: maxNewTokensOverride ?? maxContextTokens,
             maxContextTokens: maxContextTokens,
             temperature: Float(temperature),
@@ -855,6 +985,7 @@ public final class AppModel {
     }
 
     private func finishTerminalRun() {
+        saveCurrentConversation()
         phase = .idle
         runState = .idle
         isCancellationPending = false
