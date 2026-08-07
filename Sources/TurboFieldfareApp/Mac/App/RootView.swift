@@ -12,18 +12,18 @@ struct RootView: View {
     var body: some View {
         HStack(spacing: 0) {
             ConversationSidebarView(model: model)
-                .frame(width: sidebarWidth)
+                .frame(minWidth: 150, idealWidth: sidebarWidth, maxWidth: sidebarWidth)
                 .frame(maxHeight: .infinity)
 
             sidebarResizeHandle
 
             primaryContent
-                .frame(minWidth: 640, maxWidth: .infinity, maxHeight: .infinity)
+                .frame(minWidth: 460, maxWidth: .infinity, maxHeight: .infinity)
 
             Divider()
 
             InspectorView(model: model)
-                .frame(width: 320)
+                .frame(minWidth: 250, idealWidth: 320, maxWidth: 320)
                 .frame(maxHeight: .infinity)
                 .background(Color(nsColor: .windowBackgroundColor))
         }

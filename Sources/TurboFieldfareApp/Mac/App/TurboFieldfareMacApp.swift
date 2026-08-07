@@ -40,7 +40,7 @@ struct TurboFieldfareMacApp: App {
                 .frame(minWidth: 1040, minHeight: 560)
         }
         .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 1040, height: 720)
+        .defaultSize(width: 1400, height: 860)
         .windowResizability(.contentMinSize)
         .commands {
             CommandMenu("Generation") {
