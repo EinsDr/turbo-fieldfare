@@ -41,8 +41,10 @@ public struct ResponseMarkdownRenderer {
         guard !source.isEmpty else {
             return Result(attributedString: NSAttributedString(), usedFallback: false)
         }
-        guard !requiresRawFallback(source) else { return fallback(source) }
-        let presentationSource = source.replacingOccurrences(
+        let math = MathSpanExtractor.extract(from: source)
+        let prepared = ResponseMarkdownPreprocessor.prepare(math.text)
+        guard !requiresRawFallback(prepared) else { return fallback(source) }
+        let presentationSource = prepared.replacingOccurrences(
             of: #"(?m)^([ \t]*\*\*[^*\n]+\*\*[ \t]*)\n(?=\S)"#,
             with: "$1\n\n",
             options: .regularExpression)
@@ -86,6 +88,9 @@ public struct ResponseMarkdownRenderer {
             }
 
             guard output.length > 0 else { return fallback(source) }
+            CodeSyntaxHighlighter.apply(to: output)
+            MathAttachmentRenderer.substitute(
+                math.spans, in: output, fontSize: NSFont.systemFontSize)
             return Result(attributedString: output, usedFallback: false)
         } catch {
             return fallback(source)
@@ -99,12 +104,13 @@ public struct ResponseMarkdownRenderer {
     private func requiresRawFallback(_ source: String) -> Bool {
         let fenceCount = source.components(separatedBy: "```").count - 1
         if !fenceCount.isMultiple(of: 2) { return true }
-        if source.range(
+        let prose = ResponseMarkdownPreprocessor.strippingCode(source)
+        if prose.range(
             of: #"</?[A-Za-z][^>]*>"#,
             options: .regularExpression) != nil {
             return true
         }
-        return source.range(
+        return prose.range(
             of: #"!\[[^\]]*\]\([^\)]*\)"#,
             options: .regularExpression) != nil
     }
@@ -179,7 +185,8 @@ public struct ResponseMarkdownRenderer {
     ) {
         guard let previous else { return }
         let adjacentListItems = previous.kind.isList && next.kind.isList
-        let requiredNewlines = adjacentListItems ? 1 : 2
+        let adjacentCodeLines = previous.kind == .code && next.kind == .code
+        let requiredNewlines = (adjacentListItems || adjacentCodeLines) ? 1 : 2
         let trailingNewlines = output.string.reversed().prefix { $0 == "\n" }.count
         guard trailingNewlines < requiredNewlines else { return }
         output.append(NSAttributedString(
@@ -222,7 +229,8 @@ public struct ResponseMarkdownRenderer {
         if inlineIntent?.contains(.strikethrough) == true {
             values[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
         }
-        if link != nil {
+        if let link {
+            values[.link] = link
             values[.foregroundColor] = NSColor.linkColor
             values[.underlineStyle] = NSUnderlineStyle.single.rawValue
         }
