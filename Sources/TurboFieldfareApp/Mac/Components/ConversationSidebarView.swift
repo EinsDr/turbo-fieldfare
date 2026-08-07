@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 /// transcript shows the whole thing and the next prompt continues it.
 struct ConversationSidebarView: View {
     let model: AppModel
+    @State private var selection: UUID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,7 +21,10 @@ struct ConversationSidebarView: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear { model.refreshConversations() }
+        .onAppear {
+            model.refreshConversations()
+            selection = model.currentConversationID
+        }
     }
 
     private var header: some View {
@@ -55,49 +59,53 @@ struct ConversationSidebarView: View {
     }
 
     private var list: some View {
-        ScrollView {
-            LazyVStack(spacing: 2) {
-                ForEach(model.conversations) { record in
-                    row(record)
-                }
+        List(selection: $selection) {
+            ForEach(model.conversations) { record in
+                rowLabel(record)
+                    .tag(record.id)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            model.deleteConversation(record.id)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                    .contextMenu {
+                        Button("Export as Markdown\u{2026}") { export(record) }
+                        Divider()
+                        Button("Delete", role: .destructive) {
+                            model.deleteConversation(record.id)
+                        }
+                    }
             }
-            .padding(8)
+        }
+        .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .disabled(model.isRunning)
+        .onChange(of: selection) { _, newValue in
+            guard let newValue, newValue != model.currentConversationID else { return }
+            model.openConversation(newValue)
+        }
+        .onChange(of: model.currentConversationID) { _, newValue in
+            selection = newValue
         }
     }
 
-    private func row(_ record: ConversationRecord) -> some View {
-        let isCurrent = record.id == model.currentConversationID
-        return Button {
-            model.openConversation(record.id)
-        } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(record.title)
-                    .font(.callout)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                Text(record.updatedAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 6).fill(
-                    isCurrent
-                        ? TurboFieldfareMacTheme.accentColor.opacity(0.18)
-                        : Color.clear))
-            .contentShape(Rectangle())
+    /// Plain label rather than a Button: controls inside a List row compete
+    /// with the swipe gesture, so selection drives opening instead.
+    private func rowLabel(_ record: ConversationRecord) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(record.title)
+                .font(.callout)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+            Text(record.updatedAt.formatted(date: .abbreviated, time: .shortened))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
-        .buttonStyle(.plain)
-        .disabled(model.isRunning)
-        .contextMenu {
-            Button("Export as Markdown\u{2026}") { export(record) }
-            Divider()
-            Button("Delete", role: .destructive) {
-                model.deleteConversation(record.id)
-            }
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
     }
 
     private func export(_ record: ConversationRecord) {
